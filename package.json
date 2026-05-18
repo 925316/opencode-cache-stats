@@ -17,7 +17,10 @@
   },
   "files": [
     "dist",
-    "install.mjs"
+    "src",
+    "install.mjs",
+    "README.md",
+    "README_EN.md"
   ],
   "bin": {
     "opencode-visual-cache": "install.mjs"

@@ -18,11 +18,11 @@
 
 <div align="center"> 
 <strong>支持折叠，节省侧边栏占用👇</strong> <br>
-<img src="./assets/example2.png"></img>
+<img src="https://raw.githubusercontent.com/Hotakus/opencode-visual-cache/master/assets/example2.png"></img>
 </div>
 <div align="center"> 
 <strong>展开👇</strong> <br>
-<img src="./assets/example1.png"></img>
+<img src="https://raw.githubusercontent.com/Hotakus/opencode-visual-cache/master/assets/example1.png"></img>
 </div>
 
 ---
