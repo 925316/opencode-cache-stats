@@ -11,6 +11,7 @@ import type {
 } from "@opencode-ai/plugin/tui"
 import type { AssistantMessage, Message } from "@opencode-ai/sdk"
 import { createMemo, createSignal, Show } from "solid-js"
+import { PLUGIN_VERSION } from "./_version"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -223,8 +224,6 @@ const PCT_FIXED_WIDTH = 5  // "XX.X%" 固定 5 字符宽度
 const HEADER_PREFIX = 2    // 折叠态标题行：▶/▼ 图标 + 后面的空格
 const UNIT_GAP = 1         // 计量单位前的空格（如 "tok"）
 
-/** Current plugin version — bump alongside npm version. */
-const PLUGIN_VERSION = '1.1.1'
 
 function TokenCachePanel(props: {
   theme: TuiThemeCurrent
