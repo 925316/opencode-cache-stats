@@ -414,19 +414,23 @@ function TokenCachePanel(props: {
 
       dist = { system: 0, user: 0, agent: 0, toolCall: 0, toolResult: 0, output: 0, apiOutput: 0, apiInput: 0, stepCost: 0 }
 
+      // Read agent system prompt once before the message loop.  Reading it
+      // inside the per-user-message branch risks transient unavailability
+      // (api.state.config not yet resolved during streaming) silently
+      // resetting a previously-computed value and causing display flicker.
+      try {
+        const session = props.api.state.session.get(props.sessionId)
+        const cfg = props.api.state.config as Record<string, unknown>
+        const agentName = String(session?.agent ?? (cfg as any)?.default_agent ?? "build")
+        const agents = cfg?.agent as Record<string, unknown> | undefined
+        const agentCfg = agents?.[agentName] as Record<string, unknown> | undefined
+        const sysPrompt = typeof agentCfg?.prompt === "string" ? agentCfg.prompt : ""
+        if (sysPrompt) dist.system = estimateTokens(sysPrompt)
+      } catch {}
+
       for (const msg of msgs) {
         if (msg.role === "user") {
           const um = msg as UserMessage
-          // System prompt: from agent config (api.state.config.agent[agentName].prompt)
-          try {
-            const session = props.api.state.session.get(props.sessionId)
-            const cfg = props.api.state.config as Record<string, unknown>
-            const agentName = String(session?.agent ?? (cfg as any)?.default_agent ?? "build")
-            const agents = cfg?.agent as Record<string, unknown> | undefined
-            const agentCfg = agents?.[agentName] as Record<string, unknown> | undefined
-            const sysPrompt = typeof agentCfg?.prompt === "string" ? agentCfg.prompt : ""
-            if (sysPrompt) dist.system = estimateTokens(sysPrompt)
-          } catch {}
           if (um.system) dist.system += estimateTokens(um.system)
           let parts: readonly Part[] = []
           try { parts = props.api.state.part(msg.id) } catch {}
