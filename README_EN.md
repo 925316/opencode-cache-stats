@@ -5,10 +5,14 @@
     Adaptive Theme Colors · Auto-desaturated · Chinese / English
 </strong>
 <br>
+<br>
+If you find this plugin useful, a ⭐ would mean a lot — thank you!<br>
+<br>
 
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-black?style=flat-square&logo=github)](https://github.com/Hotakus/opencode-visual-cache)
 [![Stars](https://img.shields.io/github/stars/Hotakus/opencode-visual-cache?style=flat-square)](https://github.com/Hotakus/opencode-visual-cache/stargazers)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
-[![English](https://img.shields.io/badge/English-README-blue?style=flat-square)](README_EN.md)
+[![中文](https://img.shields.io/badge/中文-README-blue?style=flat-square)](https://github.com/Hotakus/opencode-visual-cache/blob/master/README.md)
 ![NPM Version](https://img.shields.io/npm/v/opencode-visual-cache?style=flat-square)
 
 </div>
