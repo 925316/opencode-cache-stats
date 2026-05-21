@@ -9,7 +9,7 @@ import type {
   TuiPluginModule,
   TuiThemeCurrent,
 } from "@opencode-ai/plugin/tui"
-import type { UserMessage, AssistantMessage, Message } from "@opencode-ai/sdk"
+import type { AssistantMessage, Message } from "@opencode-ai/sdk"
 import type {
   Part,
   TextPart,
@@ -17,340 +17,87 @@ import type {
   FilePart,
   ReasoningPart,
 } from "@opencode-ai/sdk/v2"
-import { createMemo, createSignal, onMount, onCleanup, Show } from "solid-js"
-import { PLUGIN_VERSION } from "./_version"
+import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js"
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Bun / Node globals — available at runtime in the OpenCode TUI process
-declare const process: { env: Record<string, string | undefined> } | undefined
-
-// ── terminal-width helpers ────────────────────────────────────────
-// CJK characters occupy 2 terminal columns; padEnd/padStart count
-// string length (=1 per char), which breaks alignment with mixed text.
-
-function charColumns(c: string): number {
-  const code = c.codePointAt(0) ?? 0
-  if (code < 0x20) return 0                              // control
-  if (code < 0x7F) return 1                              // ASCII
-  if (code < 0xA0) return 0                              // C1 controls
-  // East-Asian wide / fullwidth ranges
-  if ((code >= 0x1100 && code <= 0x115F) ||              // Hangul Jamo
-      (code >= 0x2E80 && code <= 0xA4CF) ||              // CJK Radicals … Yi
-      (code >= 0xAC00 && code <= 0xD7A3) ||              // Hangul
-      (code >= 0xF900 && code <= 0xFAFF) ||              // CJK Compat
-      (code >= 0xFE10 && code <= 0xFE6F) ||              // Vertical / Compat
-      (code >= 0xFF01 && code <= 0xFF60) ||              // Fullwidth
-      (code >= 0xFFE0 && code <= 0xFFE6) ||              // Fullwidth signs
-      (code >= 0x1F300 && code <= 0x1F64F) ||            // Misc Symbols (emoji)
-      (code >= 0x20000 && code <= 0x3FFFD))              // SIP / TIP
-    return 2
-  return 1
-}
-
-function visualWidth(s: string): number {
-  let w = 0; for (const c of s) w += charColumns(c); return w
-}
-
-function visualPadEnd(s: string, cols: number): string {
-  const pad = cols - visualWidth(s)
-  return pad > 0 ? s + " ".repeat(pad) : s
-}
-
-// ── language override (env: CACHE_TUI_LANG) ──
-const DEBUG_LANG = typeof process !== "undefined" ? process.env?.CACHE_TUI_LANG : undefined
-
-// ── language ──────────────────────────────────────────────────────
-
-const LANG_ZH = DEBUG_LANG
-  ? DEBUG_LANG === "zh"
-  : (() => {
-      try { return Intl.DateTimeFormat().resolvedOptions().locale.startsWith("zh") }
-      catch { return false }
-    })()
-
-const T = LANG_ZH ? {
-  title:      "缓存统计",
-  hit:        "命中率",
-  totalHit:   "总命中:",
-  read:       "缓存读:",
-  write:      "缓存写:",
-  miss:       "未命中:",
-  out:        "输出:",
-  cost:       "费用:",
-  saved:      "累计节省:",
-  model:      "模型:",
-  provider:   "提供商:",
-  rate:       "单价:",
-  hitFolded:  "命中",
-  inputRate:  "输入",
-  cacheRate:  "缓存",
-  writeRate:  "写入",
-  noData:    "等待缓存数据...",
-  tok:        "tok",
-  distTitle:  "估算 Token 分布",
-  distSys:    "系统提示:",
-  distUser:   "用户:",
-  distAgent:  "Agent 指令:",
-  distTool:   "Tool 调用:",
-  distRes:    "Tool 结果:",
-  distTotal:  "总计:",
-  distOut:    "输出:",
-  secDetail:  "明细",
-  secModel:   "模型",
-} as const : {
-  title:      "Token Cache",
-  hit:        "Hit",
-  totalHit:   "Total Hit:",
-  read:       "Read:",
-  write:      "Write:",
-  miss:       "Miss:",
-  out:        "Out:",
-  cost:       "Cost:",
-  saved:      "Total Saved:",
-  model:      "Model:",
-  provider:   "Provider:",
-  rate:       "Rate:",
-  hitFolded:  "hit",
-  inputRate:  "in",
-  cacheRate:  "cache",
-  writeRate:  "write",
-  noData:    "Waiting for cache data...",
-  tok:        "tok",
-  distTitle:  "Estimated Token Dist.",
-  distSys:    "System:",
-  distUser:   "User:",
-  distAgent:  "Agent Instr:",
-  distTool:   "Tool Call:",
-  distRes:    "Tool Result:",
-  distTotal:  "Total:",
-  distOut:    "Output:",
-  secDetail:  "Detail",
-  secModel:   "Model",
-} as const
-
-// ── color helpers ────────────────────────────────────────────────
-
-/** Extract { r, g, b } (0–255) from a hex string or RGBA-like object. */
-function rgb(raw: unknown): { r: number; g: number; b: number } | null {
-  if (typeof raw === "string" && raw.startsWith("#")) {
-    const h = raw.slice(1)
-    return {
-      r: parseInt(h.slice(0, 2), 16),
-      g: parseInt(h.slice(2, 4), 16),
-      b: parseInt(h.slice(4, 6), 16),
-    }
-  }
-  if (raw && typeof raw === "object") {
-    const o = raw as Record<string, unknown>
-    if (typeof o.r === "number" && typeof o.g === "number" && typeof o.b === "number") {
-      // RGBA channels may be 0-1 floats; detect and upscale.
-      const scale = o.r > 1 || o.g > 1 || o.b > 1 ? 1 : 255
-      return {
-        r: Math.round(o.r * scale),
-        g: Math.round(o.g * scale),
-        b: Math.round(o.b * scale),
-      }
-    }
-  }
-  return null
-}
-
-/** HSL saturation of an RGB color (0–1). */
-function saturation(r: number, g: number, b: number): number {
-  const max = Math.max(r, g, b) / 255
-  const min = Math.min(r, g, b) / 255
-  const delta = max - min
-  if (delta === 0) return 0
-  const L = (max + min) / 2
-  return L <= 0.5 ? delta / (max + min) : delta / (2 - max - min)
-}
-
-/**
- * If the colour's saturation exceeds `maxSat`, pull it toward grey
- * until saturation drops to maxSat.  Returns a hex string.
- */
-function desaturateTo(raw: unknown, maxSat: number, fallback: string): string {
-  const c = rgb(raw)
-  if (!c) return fallback
-  const sat = saturation(c.r, c.g, c.b)
-  if (sat <= maxSat) {
-    // already muted — return as hex
-    return "#" + [c.r, c.g, c.b].map((v) => v.toString(16).padStart(2, "0")).join("")
-  }
-  /**
-   * Binary search for the optimal grey-mix ratio α (0…1).
-   *
-   * 12 iterations → 1/2^12 ≈ 1/4096 resolution.  The downstream RGB
-   * channels are only 0–255 (8 bit), so 8 iterations (1/256) would
-   * technically suffice; 12 is intentionally over-budget — the extra
-   * precision costs almost nothing and guarantees the saturation probe
-   * converges to within a fraction of an 8‑bit step, eliminating
-   * colour banding in edge cases.
-   */
-  // BT.601 luma (perceptual brightness used as the grey anchor)
-  const luma = c.r * 0.299 + c.g * 0.587 + c.b * 0.114
-  let lo = 0, hi = 1
-  for (let i = 0; i < 12; i++) {
-    const mid = (lo + hi) / 2
-    const nr = Math.round(c.r + (luma - c.r) * mid)
-    const ng = Math.round(c.g + (luma - c.g) * mid)
-    const nb = Math.round(c.b + (luma - c.b) * mid)
-    if (saturation(nr, ng, nb) > maxSat) lo = mid
-    else hi = mid
-  }
-  const nr = Math.round(c.r + (luma - c.r) * hi)
-  const ng = Math.round(c.g + (luma - c.g) * hi)
-  const nb = Math.round(c.b + (luma - c.b) * hi)
-  return "#" + [nr, ng, nb].map((v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, "0")).join("")
-}
-
-// Morandi fallbacks — used when a theme colour cannot be resolved
-const FALLBACK = {
-  primary: "#8B9DAF",
-  text:    "#C5C5BB",
-  muted:   "#7A7A72",
-  success: "#9CAF8B",
-  warning: "#C5B88D",
-  error:   "#B08A8A",
-  border:  "#6B6B63",
-} as const
-
-/**
- * Desaturation ceiling for the Morandi-style palette.
- *
- * Morandi colours float around 0.15–0.30 saturation in HSL space.
- * 0.28 sits near the upper end of that range: it strips the aggressive
- * punch from high-saturation themes (Dracula, Solarized …) while
- * preserving enough colour identity that green / orange / red hit-rate
- * coding stays distinguishable.
- *
- * Lower → more grey, harder to tell colours apart.
- * Higher → bright themes bleed through and defeat the muted look.
- */
-const MAX_SAT = 0.28
-
-function progressBar(percent: number, width: number): string {
-  const clamped = Math.max(0, Math.min(100, percent))
-  const filled = Math.round((clamped / 100) * width)
-  const empty = Math.max(0, width - filled)
-  return "\u2588".repeat(filled) + "\u2591".repeat(empty)
-}
-
-function fmt(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M"
-  if (n >= 10_000) return Math.round(n / 1_000) + "K"
-  return n.toLocaleString("en-US")
-}
-
 function num(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0
 }
 
-function fmtCost(n: number, symbol = "$", rate = 1): string {
-  const v = n * rate
-  if (v >= 1) return symbol + v.toFixed(2)
-  if (v >= 0.01) return symbol + v.toFixed(3)
-  return symbol + v.toFixed(4)
+function fmt(n: number): string {
+  return n.toLocaleString("en-US")
+}
+
+function fmtCost(n: number): string {
+  if (n >= 1) return "$" + n.toFixed(2)
+  if (n >= 0.01) return "$" + n.toFixed(3)
+  return "$" + n.toFixed(4)
+}
+
+function fmtTokens(n: number): string {
+  return fmt(n) + " tokens"
 }
 
 // ── token estimation ──
-// Character-based BPE approximation.  Default ratios (~4 ASCII or ~1.5 CJK
-// chars per token) work well for natural language but systematically
-// under-count tokens in JSON and source code where every punctuation mark
-// tends to be its own token.  Detect these cases and tighten the ratio.
-// See: GPT-4 / Claude tokenizer behaviour with structured text.
-
 function estimateTokens(text: string): number {
   if (!text || text.length === 0) return 0
   let ascii = 0
   let cjk = 0
   for (const c of text) {
     const code = c.codePointAt(0) ?? 0
-    if (code >= 0x4E00 && code <= 0x9FFF) cjk++       // CJK Unified
-    else if (code >= 0x3040 && code <= 0x30FF) cjk++   // Hiragana/Katakana
-    else if (code >= 0xAC00 && code <= 0xD7A3) cjk++   // Hangul
-    else if (code >= 0x1100 && code <= 0x11FF) cjk++   // Hangul Jamo
-    else if (code >= 0x2E80 && code <= 0x2EFF) cjk++   // CJK Radicals
+    if (code >= 0x4E00 && code <= 0x9FFF) cjk++
+    else if (code >= 0x3040 && code <= 0x30FF) cjk++
+    else if (code >= 0xAC00 && code <= 0xD7A3) cjk++
+    else if (code >= 0x1100 && code <= 0x11FF) cjk++
+    else if (code >= 0x2E80 && code <= 0x2EFF) cjk++
     else ascii++
   }
-
-  // Tighten the ASCII ratio for structured content where punctuation is
-  // token-dense.  JSON key-value patterns and code keywords are strong
-  // signals that the default 4:1 ratio will materially under-estimate.
   const trimmed = text.trimStart()
   const jsonLike = (trimmed.startsWith("{") || trimmed.startsWith("["))
     && /"[^"]+"\s*:/.test(text)
   const codeLike = !jsonLike
     && /```|^import |^export |^function |^const |^let |^var |^class |^interface |^type |^def |^fn |^pub |^use |^mod |^package /m.test(text)
-
   const asciiPerToken = jsonLike ? 2 : codeLike ? 2.5 : 4
   return Math.max(1, Math.ceil(ascii / asciiPerToken + cjk / 1.5))
 }
 
 interface TokenDist {
-  system: number   // UserMessage.system
-  user: number     // user message text/file parts
-  agent: number    // SubtaskPart.prompt + ReasoningPart.text
-  toolCall: number // ToolPart.input (actual tool params)
-  toolResult: number // ToolPart completed output / error
-  output: number   // AssistantMessage.tokens.output (fallback)
-  apiOutput: number // StepFinishPart.tokens.output (API exact, preferred)
-  apiInput: number  // StepFinishPart.tokens.input (API exact total context)
-  stepCost: number
+  system: number
+  user: number
+  agent: number
+  toolCall: number
+  toolResult: number
+  output: number
+}
+
+// ---------------------------------------------------------------------------
+// Row component: label left, value right
+// ---------------------------------------------------------------------------
+
+function Row(props: { label: string; value: string; color?: string; mutedColor: string }): JSX.Element {
+  return (
+    <box flexDirection="row" justifyContent="space-between" paddingLeft={0} paddingRight={0}>
+      <text fg={props.color ?? props.mutedColor}>{props.label}</text>
+      <text fg={props.color ?? props.mutedColor}>{props.value}</text>
+    </box>
+  )
 }
 
 // ---------------------------------------------------------------------------
 // Sidebar component
 // ---------------------------------------------------------------------------
 
-/** Module-level config signals — shared between the TUI component and slash
- *  commands so that runtime changes take effect immediately without restart. */
-const [currencySymbol, setCurrencySymbol] = createSignal("$")
-const [exchangeRate, setExchangeRate] = createSignal(1)
-const [sectionDetail, setSectionDetail] = createSignal(true)
-const [sectionModel, setSectionModel] = createSignal(true)
-const [sectionDist, setSectionDist] = createSignal(true)
-const [borderVisible, setBorderVisible] = createSignal(true)
-
-const CURRENCIES: Record<string, string> = {
-  USD: "$", CNY: "¥", EUR: "€", JPY: "JP¥", GBP: "£", KRW: "₩",
-}
-/** Approximate USD exchange rates — used as defaults when switching currency.
- *  Users can override via /cache-rate.  Last updated 2026-05. */
-const DEFAULT_RATES: Record<string, number> = {
-  USD: 1, CNY: 7.2, EUR: 0.92, JPY: 150, GBP: 0.79, KRW: 1350,
-}
-
-const MIN_PANEL_WIDTH = 20
-const DEFAULT_PANEL_WIDTH = 26
-
-/** ── layout measurement constants (visual columns) ── */
-const LABEL_GAP = 1        // label（如 "Hit"）后面的空格
-const BAR_BRACKETS = 2     // "[" + "]" 包围进度条
-const BAR_GAP = 1          // "]" 后面的空格
-const PCT_FIXED_WIDTH = 5  // "XX.X%" 固定 5 字符宽度
-const HEADER_PREFIX = 2    // 折叠态标题行：▶/▼ 图标 + 后面的空格
-const UNIT_GAP = 1         // 计量单位前的空格（如 "tok"）
-
-
 function TokenCachePanel(props: {
   theme: TuiThemeCurrent
   api: TuiPluginApi
   sessionId: string
 }): JSX.Element {
-  const [panelWidth, setPanelWidth] = createSignal(DEFAULT_PANEL_WIDTH)
-  const [open, setOpen] = createSignal(true)
-  const [detailOpen, setDetailOpen] = createSignal(true)
-  const [modelOpen, setModelOpen] = createSignal(true)
-  const [distOpen, setDistOpen] = createSignal(false)
-  let boxEl: any
+  const [partVersion, setPartVersion] = createSignal(0)
 
   // ── scan session messages reactively ──
-  // SolidJS createMemo re-evaluates whenever the underlying
-  // api.state.session state changes — no event listener needed.
   const data = createMemo(() => {
     const msgs = props.api.state.session.messages(props.sessionId) as Message[]
 
@@ -362,79 +109,48 @@ function TokenCachePanel(props: {
     let pid = ""
     let mid = ""
 
-    // Track individual hit rates per assistant message to compute trend
-    let prevMsgHitRate = -1
-    let lastMsgHitRate = -1
-
     for (const msg of msgs) {
       if (msg.role !== "assistant") continue
       const t = (msg as AssistantMessage).tokens
       if (!t) continue
-      const msgInputTokens = num(t.input) + num(t.cache?.read)
-      const msgReadTokens = num(t.cache?.read)
-      if (msgInputTokens > 0) {
-        prevMsgHitRate = lastMsgHitRate
-        lastMsgHitRate = (msgReadTokens / msgInputTokens) * 100
-      }
       input += num(t.input)
-      read   += num(t.cache?.read)
-      write  += num(t.cache?.write)
+      read += num(t.cache?.read)
+      write += num(t.cache?.write)
       output += num(t.output)
-      cost   += num((msg as AssistantMessage).cost)
+      cost += num((msg as AssistantMessage).cost)
       if ((msg as AssistantMessage).providerID && (msg as AssistantMessage).modelID) {
         pid = (msg as AssistantMessage).providerID
         mid = (msg as AssistantMessage).modelID
       }
     }
 
-    // cost savings from cache hits
-    let saved = 0
-    let inputRate = 0
-    let cacheReadRate = 0
-    let cacheWriteRate = 0
-    if (read > 0 && pid && mid) {
-      for (const provider of props.api.state.provider) {
-        if (provider.id !== pid) continue
-        const model = provider.models[mid]
-        if (!model?.cost) continue
-        inputRate = num(model.cost.input)
-        cacheReadRate = num(model.cost.cache?.read)
-        cacheWriteRate = num(model.cost.cache?.write)
-        const diff = inputRate - cacheReadRate
-        if (diff > 0) saved = (read * diff) / 1_000_000
-        break
-      }
-    }
-
-    // `input` from the API represents fresh (non-cached) tokens.
-    const hitRate = lastMsgHitRate >= 0 ? lastMsgHitRate : 0
-    // Total context = fresh + cache.read.
     const freshTotal = input + read
-    const sessionHitRate = freshTotal > 0 ? (read / freshTotal) * 100 : 0
-    const model = mid.split("/").pop() ?? mid
-    const hasPricing = inputRate > 0 || cacheReadRate > 0 || cacheWriteRate > 0
+    const hitRate = freshTotal > 0 ? (read / freshTotal) * 100 : 0
+    const hasData = read > 0 || write > 0 || input > 0 || output > 0
 
-    let trend = 0
-    const hasTrendData = prevMsgHitRate >= 0 && lastMsgHitRate >= 0
-    if (hasTrendData) {
-      trend = lastMsgHitRate - prevMsgHitRate
+    // Cost savings from cache hits
+    let saved = 0
+    if (read > 0 && pid && mid) {
+      try {
+        for (const provider of props.api.state.provider) {
+          if (provider.id !== pid) continue
+          const model = provider.models[mid]
+          if (!model?.cost) continue
+          const inputRate = num(model.cost.input)
+          const cacheReadRate = num(model.cost.cache?.read)
+          const diff = inputRate - cacheReadRate
+          if (diff > 0) saved = (read * diff) / 1_000_000
+          break
+        }
+      } catch {}
     }
 
-    const providerName = pid || ""
-
-    // ── token distribution (in-process via api.state.part) ──
-    // Wrapped in try-catch so a part fetching failure never crashes the panel.
-    let dist: TokenDist = { system: 0, user: 0, agent: 0, toolCall: 0, toolResult: 0, output: 0, apiOutput: 0, apiInput: 0, stepCost: 0 }
-    let hasDistData = false
+    // Token distribution
+    const dist: TokenDist = { system: 0, user: 0, agent: 0, toolCall: 0, toolResult: 0, output: 0 }
     try {
       partVersion() // track part changes for reactivity
 
-      dist = { system: 0, user: 0, agent: 0, toolCall: 0, toolResult: 0, output: 0, apiOutput: 0, apiInput: 0, stepCost: 0 }
-
-      // Read agent system prompt once before the message loop.  Reading it
-      // inside the per-user-message branch risks transient unavailability
-      // (api.state.config not yet resolved during streaming) silently
-      // resetting a previously-computed value and causing display flicker.
+      // Read agent system prompt
       try {
         const session = props.api.state.session.get(props.sessionId)
         const cfg = props.api.state.config as Record<string, unknown>
@@ -447,13 +163,13 @@ function TokenCachePanel(props: {
 
       for (const msg of msgs) {
         if (msg.role === "user") {
-          const um = msg as UserMessage
+          const um = msg as any
           if (um.system) dist.system += estimateTokens(um.system)
           let parts: readonly Part[] = []
           try { parts = props.api.state.part(msg.id) } catch {}
           for (const p of parts) {
-            if (p.type === "text" && !(p as unknown as Record<string, unknown>).synthetic && !(p as unknown as Record<string, unknown>).ignored) {
-              dist.user += estimateTokens((p as unknown as TextPart).text)
+            if (p.type === "text" && !(p as any).synthetic && !(p as any).ignored) {
+              dist.user += estimateTokens((p as TextPart).text)
             } else if (p.type === "file") {
               const fp = p as unknown as FilePart
               if (fp.source?.text?.value) dist.user += estimateTokens(fp.source.text.value)
@@ -462,19 +178,16 @@ function TokenCachePanel(props: {
         } else if (msg.role === "assistant") {
           const am = msg as AssistantMessage
           dist.output += num(am.tokens?.output)
-
           let parts: readonly Part[] = []
           try { parts = props.api.state.part(msg.id) } catch {}
           for (const p of parts) {
             if (p.type === "tool") {
               const tp = p as unknown as ToolPart
-              // Tool call input (params)
               let rawInput = ""
               try {
-                rawInput = (tp.state as unknown as { raw?: string }).raw ?? JSON.stringify(tp.state.input)
+                rawInput = (tp.state as any).raw ?? JSON.stringify(tp.state.input)
               } catch { try { rawInput = JSON.stringify(tp.state) } catch {} }
               if (rawInput) dist.toolCall += estimateTokens(rawInput)
-              // Tool result output
               if (tp.state.status === "completed") {
                 const completed = tp.state as unknown as { output: string }
                 if (completed.output) dist.toolResult += estimateTokens(completed.output)
@@ -487,103 +200,26 @@ function TokenCachePanel(props: {
             } else if (p.type === "subtask") {
               const sub = p as unknown as { prompt: string; description: string }
               dist.agent += estimateTokens(sub.prompt || sub.description || "")
-            } else if (p.type === "step-finish") {
-              // StepFinishPart carries API-exact per-call token counts.
-              // Sum across all step-finish parts (one per API call in tool loops).
-              const sf = p as unknown as { tokens?: { input?: number; output?: number } }
-              dist.apiInput += sf.tokens?.input ?? 0
-              dist.apiOutput += sf.tokens?.output ?? 0
             }
           }
         }
       }
-
-      const totalInput = dist.system + dist.user + dist.agent + dist.toolCall + dist.toolResult
-      const apiTotalInput = dist.apiInput
-      // Use API output if available (StepFinishPart is more accurate than AssistantMessage.tokens)
-      const finalOutput = dist.apiOutput > 0 ? dist.apiOutput : dist.output
-
-      // Gap inference: the SDK does not expose per-part token counts, so any
-      // API-exact input total that exceeds the locally-estimated sum is attributed
-      // to system prompt / agent config / tool-definition overhead.  Add it to the
-      // system bucket rather than replacing the local estimate.
-      const overhead = Math.max(0, apiTotalInput - totalInput)
-      if (overhead >= 50) {
-        dist.system += overhead
-      }
-
-      hasDistData = totalInput > 0 || finalOutput > 0 || apiTotalInput > 0
-    } catch {
-      // Graceful degradation — dist stays at zeroes
-    }
-
-    return {
-      hitRate, read, write, freshInput: input, output,
-      cost, saved, model, inputRate, cacheReadRate, cacheWriteRate, hasPricing,
-      hasData: read > 0 || write > 0 || input > 0 || output > 0 || cost > 0,
-      trend, hasTrendData,
-      providerName,
-      sessionHitRate,
-      dist, hasDistData,
-    }
-  })
-
-  // ── token distribution (in-process via api.state.part) ──
-  const [partVersion, setPartVersion] = createSignal(0)
-
-  // Persist fold state to api.kv
-  const KV_PREFIX = "cache_panel"
-  const persistFold = (key: string, val: boolean) => {
-    try { props.api.kv.set(`${KV_PREFIX}.${key}`, val) } catch {}
-  }
-
-  onMount(() => {
-    // Restore fold state from persisted storage
-    try {
-      setOpen(Boolean(props.api.kv.get(`${KV_PREFIX}.open`, false)))
-      setDetailOpen(Boolean(props.api.kv.get(`${KV_PREFIX}.detail`, true)))
-      setModelOpen(Boolean(props.api.kv.get(`${KV_PREFIX}.model`, true)))
-      setDistOpen(Boolean(props.api.kv.get(`${KV_PREFIX}.dist`, false)))
     } catch {}
 
-    // Restore user config (currency, rate, section visibility)
-    try {
-      const sym = props.api.kv.get<string>(`${KV_PREFIX}.currency`)
-      const rate = props.api.kv.get<number>(`${KV_PREFIX}.rate`)
-      if (typeof sym === "string") setCurrencySymbol(sym)
-      if (typeof rate === "number" && rate > 0) setExchangeRate(rate)
-      setSectionDetail(Boolean(props.api.kv.get(`${KV_PREFIX}.section.detail`, true)))
-      setSectionModel(Boolean(props.api.kv.get(`${KV_PREFIX}.section.model`, true)))
-      setSectionDist(Boolean(props.api.kv.get(`${KV_PREFIX}.section.dist`, true)))
-      const borderVal = props.api.kv.get<boolean>(`${KV_PREFIX}.border`, true)
-      setBorderVisible(borderVal !== false)
-    } catch {}
+    const hasDistData = dist.system + dist.user + dist.agent + dist.toolCall + dist.toolResult > 0
 
-    // (border visibility was restored above together with section config)
-
-    const unsubPart = props.api.event.on("message.part.updated", () => {
-      setPartVersion((v) => v + 1)
-    })
-    const unsubMsg = props.api.event.on("message.updated", () => {
-      setPartVersion((v) => v + 1)
-    })
-    onCleanup(() => { unsubPart(); unsubMsg() })
+    return { hitRate, read, write, input, output, saved, hasData, dist, hasDistData }
   })
 
   // ── colours ──
-  // Pull from the current theme, auto-desaturate if too punchy,
-  // fall back to Morandi when a key is missing from the theme.
   const pal = createMemo(() => {
     const t = props.theme as Record<string, unknown>
-    const sat = (k: string, fb: string) => desaturateTo(t[k], MAX_SAT, fb)
     return {
-      primary:   sat("primary",   FALLBACK.primary),
-      text:      sat("text",      FALLBACK.text),
-      muted:     sat("textMuted", FALLBACK.muted),
-      success:   sat("success",   FALLBACK.success),
-      warning:   sat("warning",   FALLBACK.warning),
-      error:     sat("error",     FALLBACK.error),
-      border:    sat("border",    FALLBACK.border),
+      text: (typeof t.text === "string" ? t.text : "#C5C5BB") as string,
+      muted: (typeof t.textMuted === "string" ? t.textMuted : "#7A7A72") as string,
+      success: (typeof t.success === "string" ? t.success : "#9CAF8B") as string,
+      warning: (typeof t.warning === "string" ? t.warning : "#C5B88D") as string,
+      error: (typeof t.error === "string" ? t.error : "#B08A8A") as string,
     }
   })
 
@@ -594,216 +230,66 @@ function TokenCachePanel(props: {
     return pal().error
   })
 
-  /** Horizontal space eaten by border (1+1 when visible) + padding (2+2 when visible). */
-  const gutter = createMemo(() => borderVisible() ? 6 : 0)
-
-  const sep = createMemo(() => "\u2500".repeat(Math.max(1, panelWidth() - gutter())))
-  function trendLabel(t: number): string {
-    return (t > 0 ? "\u2191" : t < 0 ? "\u2193" : "-") + (t !== 0 ? Math.abs(t).toFixed(1) + "%" : "")
-  }
-
-  const barW = createMemo(() => {
-    const trendSpace = data().hasTrendData ? LABEL_GAP + visualWidth(trendLabel(data().trend)) : 0
-    const overhead = visualWidth(T.hit) + LABEL_GAP + BAR_BRACKETS + BAR_GAP + PCT_FIXED_WIDTH + trendSpace + gutter()
-    return Math.max(3, panelWidth() - overhead)
-  })
-  const bar = createMemo(() => progressBar(data().hitRate, barW()))
   const pct = createMemo(() => (Math.floor(data().hitRate * 10) / 10).toFixed(1) + "%")
 
-  // left-align label, right-align value — auto-fill space between
-  const justify = (label: string, value: string, unit = ""): string => {
-    const gauge = panelWidth() - gutter()
-    const used = visualWidth(label) + visualWidth(value) + (unit ? visualWidth(unit) + UNIT_GAP : 0)
-    const gap = Math.max(1, gauge - used)
-    return label + " ".repeat(gap) + value + (unit ? " " + unit : "")
-  }
+  onMount(() => {
+    const unsubPart = props.api.event.on("message.part.updated", () => {
+      setPartVersion((v) => v + 1)
+    })
+    const unsubMsg = props.api.event.on("message.updated", () => {
+      setPartVersion((v) => v + 1)
+    })
+    onCleanup(() => { unsubPart(); unsubMsg() })
+  })
 
   return (
     <box
-      border={borderVisible()}
-      borderColor={pal().border}
+      border={false}
       paddingTop={0}
       paddingBottom={0}
-      paddingLeft={borderVisible() ? 2 : 0}
-      paddingRight={borderVisible() ? 2 : 0}
+      paddingLeft={0}
+      paddingRight={0}
       flexDirection="column"
       gap={0}
-      ref={boxEl}
-      onSizeChange={() => {
-        // boxEl.width may be undefined before the first measurement — guard with 0
-        const w = boxEl ? Math.max(MIN_PANEL_WIDTH, boxEl.width ?? 0) : DEFAULT_PANEL_WIDTH
-        setPanelWidth((prev) => (prev === w ? prev : w))
-      }}
     >
-      {/* collapsible header */}
-      <text onMouseUp={() => setOpen((o) => { const n = !o; persistFold("open", n); return n })}>
-        <span style={{ fg: pal().muted }}>{open() ? "\u25bc " : "\u25b6 "}</span>
-        <span style={{ fg: pal().primary }}>
-            <b>{T.title}</b>
-            <Show when={open()}>
-              <span style={{ fg: pal().muted }}> (v{PLUGIN_VERSION})</span>
-            </Show>
-          </span>
-        <Show when={!open() && data().hasData}>
-          <Show when={data().hasTrendData}>
-            <span>
-              {" ".repeat(Math.max(1, panelWidth() - gutter() - HEADER_PREFIX - visualWidth(T.title) - visualWidth(pct() + " " + T.hitFolded + " " + trendLabel(data().trend))))}
-            </span>
-            <span style={{ fg: hitColor() }}>{pct()} {T.hitFolded}</span>
-            <span style={{ fg: data().trend !== 0 ? (data().trend > 0 ? pal().success : pal().error) : pal().text }}>
-              {" "}{trendLabel(data().trend)}
-            </span>
-          </Show>
-          <Show when={!data().hasTrendData}>
-            <span>
-              {" ".repeat(Math.max(1, panelWidth() - gutter() - HEADER_PREFIX - visualWidth(T.title) - visualWidth(pct() + " " + T.hitFolded)))}
-            </span>
-            <span style={{ fg: hitColor() }}>{pct()} {T.hitFolded}</span>
-          </Show>
+      <Show when={data().hasData} fallback={
+        <text fg={pal().muted}>Waiting for cache data...</text>
+      }>
+        {/* Hit rate */}
+        <Row label="Hit Rate" value={pct()} color={hitColor()} mutedColor={pal().muted} />
+
+        {/* Token detail */}
+        <Show when={data().read > 0}>
+          <Row label="Read Cache" value={fmtTokens(data().read)} mutedColor={pal().muted} />
         </Show>
-      </text>
+        <Show when={data().write > 0}>
+          <Row label="Write Cache" value={fmtTokens(data().write)} mutedColor={pal().muted} />
+        </Show>
+        <Row label="Input" value={fmtTokens(data().input)} mutedColor={pal().muted} />
+        <Row label="Output" value={fmtTokens(data().output)} mutedColor={pal().muted} />
 
-      <Show when={open()}>
-        <Show when={data().hasData} fallback={
-          <>
-            <text fg={pal().muted}>{sep()}</text>
-            <text>
-              <span style={{ fg: pal().muted }}>{"> "}</span>
-              <span style={{ fg: pal().muted }}>{T.noData}</span>
-            </text>
-          </>
-        }>
-          <text fg={pal().muted}>{sep()}</text>
-
-          {/* hit rate + bar — inline to avoid box spacing */}
-          <text>
-            <span style={{ fg: pal().text }}>{T.hit} </span>
-            <span style={{ fg: hitColor() }}>[{bar()}] </span>
-            <span style={{ fg: pal().text }}>{pct()}</span>
-            <Show when={data().hasTrendData}>
-              <span style={{ fg: data().trend !== 0 ? (data().trend > 0 ? pal().success : pal().error) : pal().text }}>
-                {" "}{trendLabel(data().trend)}
-              </span>
-            </Show>
-          </text>
-
-          {/* session cumulative hit rate */}
-          <text fg={pal().muted}>
-            {justify(T.totalHit, (Math.floor(data().sessionHitRate * 10) / 10).toFixed(1) + "%")}
-          </text>
-
-          {/* ── detail section (collapsible, default open) ── */}
-          <Show when={sectionDetail()}>
-          <text onMouseUp={() => setDetailOpen((o) => { const n = !o; persistFold("detail", n); return n })}>
-            <span style={{ fg: pal().muted }}>{detailOpen() ? "\u25bc " : "\u25b6 "}</span>
-            <span style={{ fg: pal().primary }}><b>{T.secDetail}</b></span>
-            <span style={{ fg: pal().muted }}>{sep().slice(visualWidth((detailOpen() ? "\u25bc " : "\u25b6 ") + T.secDetail))}</span>
-          </text>
-
-          <Show when={detailOpen()}>
-            <Show when={data().read > 0}>
-              <text fg={pal().muted}>
-                {justify(T.read,  fmt(data().read),         T.tok)}
-              </text>
-            </Show>
-            <Show when={data().write > 0}>
-              <text fg={pal().muted}>
-                {justify(T.write, fmt(data().write),        T.tok)}
-              </text>
-            </Show>
-            <text fg={pal().muted}>
-              {justify(T.miss,  fmt(data().freshInput),   T.tok)}
-            </text>
-            <text fg={pal().muted}>
-              {justify(T.out,   fmt(data().output),       T.tok)}
-            </text>
-            <Show when={data().saved > 0}>
-              <text>
-                <span style={{ fg: pal().muted }}>{T.saved}</span>
-                <span>{" ".repeat(Math.max(1, panelWidth() - gutter() - visualWidth(T.saved) - visualWidth("~" + fmtCost(data().saved, currencySymbol(), exchangeRate()))))}</span>
-                <span style={{ fg: pal().success }}>~{fmtCost(data().saved, currencySymbol(), exchangeRate())}</span>
-              </text>
-            </Show>
-          </Show>
-          </Show>
-
-          {/* ── model section (collapsible, default open) ── */}
-          <Show when={sectionModel()}>
-          {<text onMouseUp={() => setModelOpen((o) => { const n = !o; persistFold("model", n); return n })}>
-            <span style={{ fg: pal().muted }}>{modelOpen() ? "\u25bc " : "\u25b6 "}</span>
-            <span style={{ fg: pal().primary }}><b>{T.secModel}</b></span>
-            <span style={{ fg: pal().muted }}>{sep().slice(visualWidth((modelOpen() ? "\u25bc " : "\u25b6 ") + T.secModel))}</span>
-          </text>}
-
-          <Show when={modelOpen()}>
-            <text fg={pal().text}>
-              {justify(T.cost,  fmtCost(data().cost, currencySymbol(), exchangeRate()))}
-            </text>
-            <Show when={data().providerName}>
-              <text fg={pal().muted}>
-                {justify(T.provider, data().providerName)}
-              </text>
-            </Show>
-            <text fg={pal().muted}>
-              {justify(T.model, data().model)}
-            </text>
-            <Show when={data().hasPricing}>
-              <text fg={pal().muted}>
-                {justify(T.rate, currencySymbol() + (data().inputRate * exchangeRate()).toFixed(2) + "/M " + T.inputRate)}
-              </text>
-              <Show when={data().cacheReadRate > 0}>
-                <text fg={pal().muted}>
-                  {justify("", currencySymbol() + (data().cacheReadRate * exchangeRate()).toFixed(2) + "/M " + T.cacheRate)}
-                </text>
-              </Show>
-              <Show when={data().cacheWriteRate > 0}>
-                <text fg={pal().muted}>
-                  {justify("", currencySymbol() + (data().cacheWriteRate * exchangeRate()).toFixed(2) + "/M " + T.writeRate)}
-                </text>
-            </Show>
-          </Show>
-          </Show>
+        {/* Saved */}
+        <Show when={data().saved > 0}>
+          <Row label="Saved" value={"~" + fmtCost(data().saved)} color={pal().success} mutedColor={pal().muted} />
         </Show>
 
-          {/* ── token distribution (collapsible, default closed) ── */}
-          <Show when={sectionDist()}>
-          <Show when={data().hasDistData}>
-            {<text onMouseUp={() => setDistOpen((o) => { const n = !o; persistFold("dist", n); return n })}>
-              <span style={{ fg: pal().muted }}>{distOpen() ? "\u25bc " : "\u25b6 "}</span>
-              <span style={{ fg: pal().primary }}><b>{T.distTitle}</b></span>
-              <span style={{ fg: pal().muted }}>{sep().slice(visualWidth((distOpen() ? "\u25bc " : "\u25b6 ") + T.distTitle))}</span>
-            </text>}
-            <Show when={distOpen()}>
-            <Show when={data().dist.system > 0}>
-              <text fg={pal().muted}>
-                {justify(T.distSys, fmt(data().dist.system), T.tok)}
-              </text>
-            </Show>
-            <Show when={data().dist.user > 0}>
-              <text fg={pal().muted}>
-                {justify(T.distUser, fmt(data().dist.user), T.tok)}
-              </text>
-            </Show>
-            <Show when={data().dist.agent > 0}>
-              <text fg={pal().muted}>
-                {justify(T.distAgent, fmt(data().dist.agent), T.tok)}
-              </text>
-            </Show>
-            <Show when={data().dist.toolCall > 0}>
-              <text fg={pal().muted}>
-                {justify(T.distTool, fmt(data().dist.toolCall), T.tok)}
-              </text>
-            </Show>
-            <Show when={data().dist.toolResult > 0}>
-              <text fg={pal().muted}>
-                {justify(T.distRes, fmt(data().dist.toolResult), T.tok)}
-              </text>
-            </Show>
-            <text fg={pal().text}>
-              {justify(T.distTotal, fmt(data().dist.system + data().dist.user + data().dist.agent + data().dist.toolCall + data().dist.toolResult), T.tok)}
-            </text>
-            </Show>
+        {/* Token distribution */}
+        <Show when={data().hasDistData}>
+          <text fg={pal().text}>{"Token Dist"}</text>
+          <Show when={data().dist.system > 0}>
+            <Row label="System" value={fmtTokens(data().dist.system)} mutedColor={pal().muted} />
           </Show>
+          <Show when={data().dist.user > 0}>
+            <Row label="User" value={fmtTokens(data().dist.user)} mutedColor={pal().muted} />
+          </Show>
+          <Show when={data().dist.agent > 0}>
+            <Row label="Agent" value={fmtTokens(data().dist.agent)} mutedColor={pal().muted} />
+          </Show>
+          <Show when={data().dist.toolCall > 0}>
+            <Row label="Tool Call" value={fmtTokens(data().dist.toolCall)} mutedColor={pal().muted} />
+          </Show>
+          <Show when={data().dist.toolResult > 0}>
+            <Row label="Tool Result" value={fmtTokens(data().dist.toolResult)} mutedColor={pal().muted} />
           </Show>
         </Show>
       </Show>
@@ -834,122 +320,6 @@ function createSidebarSlot(api: TuiPluginApi): TuiSlotPlugin {
 
 const tui: TuiPlugin = async (api: TuiPluginApi) => {
   api.slots.register(createSidebarSlot(api))
-
-  // ── slash commands for runtime config ──
-  const KV_PREFIX = "cache_panel"
-  api.command?.register(() => [
-    {
-      title: "Cache: Set Currency",
-      value: "cache.currency",
-      description: "Change the currency unit for cost display",
-      slash: { name: "cache-currency" },
-      onSelect: (dialog) => {
-        dialog?.replace(() => (
-          <api.ui.DialogSelect
-            title="Select Currency"
-            options={Object.entries(CURRENCIES).map(([code, sym]) => ({
-              title: `${code}  (${sym})`,
-              value: code,
-            }))}
-            onSelect={(opt) => {
-              const sym = CURRENCIES[opt.value] ?? "$"
-              const defRate = DEFAULT_RATES[opt.value] ?? 1
-              api.kv.set(`${KV_PREFIX}.currency`, sym)
-              api.kv.set(`${KV_PREFIX}.rate`, defRate)
-              setCurrencySymbol(sym)
-              setExchangeRate(defRate)
-              api.ui.toast({ message: `Currency: ${opt.value} (${sym}), rate: ${defRate}` })
-              dialog?.clear()
-            }}
-          />
-        ))
-      },
-    },
-    {
-      title: "Cache: Set Exchange Rate",
-      value: "cache.rate",
-      description: "Set the exchange rate multiplier for the selected currency",
-      slash: { name: "cache-rate" },
-      onSelect: (dialog) => {
-        dialog?.replace(() => (
-          <api.ui.DialogPrompt
-            title="Exchange Rate"
-            description={() => <text>Enter the exchange rate from USD to your currency (e.g. 7.2 for CNY)</text>}
-            placeholder="1.0"
-            value={String(api.kv.get<number>(`${KV_PREFIX}.rate`, 1))}
-            onConfirm={(val) => {
-              const n = parseFloat(val)
-              if (n > 0) {
-                api.kv.set(`${KV_PREFIX}.rate`, n)
-                setExchangeRate(n)
-                api.ui.toast({ message: `Exchange rate set to ${n}` })
-              }
-              dialog?.clear()
-            }}
-          />
-        ))
-      },
-    },
-    {
-      title: "Cache: Toggle Section",
-      value: "cache.section",
-      description: "Show or hide a sidebar section",
-      slash: { name: "cache-section" },
-      onSelect: (dialog) => {
-        const detailOn = Boolean(api.kv.get(`${KV_PREFIX}.section.detail`, true))
-        const modelOn  = Boolean(api.kv.get(`${KV_PREFIX}.section.model`, true))
-        const distOn   = Boolean(api.kv.get(`${KV_PREFIX}.section.dist`, true))
-        const borderOn = Boolean(api.kv.get(`${KV_PREFIX}.border`, true))
-        dialog?.replace(() => (
-          <api.ui.DialogSelect
-            title="Toggle Section"
-            options={[
-              { title: `Token Detail    [${detailOn ? "ON" : "OFF"}]`,  value: "detail" },
-              { title: `Model & Pricing [${modelOn  ? "ON" : "OFF"}]`,  value: "model" },
-              { title: `Token Dist.     [${distOn   ? "ON" : "OFF"}]`,  value: "dist" },
-              { title: `Panel Border    [${borderOn ? "ON" : "OFF"}]`,  value: "border" },
-            ]}
-            onSelect={(opt) => {
-              if (opt.value === "border") {
-                const cur = Boolean(api.kv.get(`${KV_PREFIX}.border`, true))
-                api.kv.set(`${KV_PREFIX}.border`, !cur)
-                setBorderVisible(!cur)
-                api.ui.toast({ message: `Panel border ${!cur ? "shown" : "hidden"}` })
-              } else {
-                const key = `${KV_PREFIX}.section.${opt.value}`
-                const cur = Boolean(api.kv.get(key, true))
-                api.kv.set(key, !cur)
-                if (opt.value === "detail") setSectionDetail(!cur)
-                if (opt.value === "model")  setSectionModel(!cur)
-                if (opt.value === "dist")   setSectionDist(!cur)
-                api.ui.toast({ message: `${opt.value} section ${!cur ? "shown" : "hidden"}` })
-              }
-              dialog?.clear()
-            }}
-          />
-        ))
-      },
-    },
-    {
-      title: "Cache: Show Config",
-      value: "cache.config",
-      description: "Display the current plugin configuration",
-      slash: { name: "cache-config" },
-      onSelect: (dialog) => {
-        const sym = api.kv.get<string>(`${KV_PREFIX}.currency`) ?? "$"
-        const rate = api.kv.get<number>(`${KV_PREFIX}.rate`) ?? 1
-        const detail = Boolean(api.kv.get(`${KV_PREFIX}.section.detail`, true))
-        const model = Boolean(api.kv.get(`${KV_PREFIX}.section.model`, true))
-        const dist = Boolean(api.kv.get(`${KV_PREFIX}.section.dist`, true))
-        api.ui.toast({
-          title: "Cache Panel Config",
-          message: `Currency: ${sym}  |  Rate: ${rate}  |  Detail: ${detail ? "ON" : "OFF"}  |  Model: ${model ? "ON" : "OFF"}  |  Dist: ${dist ? "ON" : "OFF"}`,
-          duration: 8000,
-        })
-        dialog?.clear()
-      },
-    },
-  ])
 }
 
 const mod: TuiPluginModule & { id: string } = {
