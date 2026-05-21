@@ -36,17 +36,16 @@ If you find this plugin useful, a ⭐ would mean a lot — thank you!<br>
 
 ## 2. Features
 
-- **Cache Hit Rate**: Real-time `cache_read / total_input × 100%` with adaptive-width progress bar
-- **Token Breakdown**: Cache Read / Write / Miss / Output, left-aligned labels, right-aligned values
-- **Cost & Savings**: Session cost + cache savings (input_rate − cache_read_rate) × cache_read
-- **Model Pricing**: Current model's input / cache-read rates (from provider config)
-- **Collapsible**: Click title to fold into one line
-- **Adaptive Colors**: ≥85% green · ≥70% orange · <70% red, auto-desaturated from theme
+- **Cache Hit Rate**: Real-time hit rate with adaptive-width progress bar and trend indicator
+- **Token Detail**: Cache read / write / miss / output, left-aligned labels, right-aligned values
+- **Cost & Savings**: Session cumulative cost plus cache-hit savings
+- **Model Pricing**: Input / cache-read / cache-write per-million rates (read from provider config dynamically)
+- **Collapsible**: Main title collapsed by default; click to expand. Detail, model, and distribution sections fold independently
+- **Adaptive Colors**: ≥85% green · ≥70% orange · <70% red, auto-desaturated from current theme
 - **Token Distribution**: Per-role (system / user / agent instr / tool call / tool result) estimated token breakdown
-- **Collapsible Sections**: Detail, model, and token distribution fold independently
-- **Persistent Fold State**: Fold preferences remembered across restarts
+- **Persistent State**: Fold preferences and config remembered across restarts via api.kv
 - **Language**: Auto-detects system locale
-- **Multi-currency**: Switch via `/cache-currency` — costs and savings convert in real time
+- **Multi-currency**: Switch via `/cache-currency` — costs, savings, and per-million rates convert in real time
 - **Slash Commands**: `/cache-rate` `/cache-section` `/cache-config` for live panel configuration
 
 ---
@@ -100,6 +99,11 @@ The plugin supports slash commands and command palette (`Ctrl + P`) for runtime 
 | `/cache-rate` | Adjust exchange rate | Enter a custom rate (e.g. `7.2` for CNY) |
 | `/cache-section` | Toggle sections | Independently show/hide Detail, Model & Pricing, or Token Distribution |
 | `/cache-config` | View current config | Displays currency, rate, and section visibility |
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/Hotakus/opencode-visual-cache/master/assets/splash_cmd.png" alt="Slash command" width="49%"></img>
+  <img src="https://raw.githubusercontent.com/Hotakus/opencode-visual-cache/master/assets/ctrlP_cmd.png" alt="Ctrl+P command palette" width="49%"></img>
+</div>
 
 Switching currency automatically applies a built-in approximate exchange rate (USD-based). Override it anytime with `/cache-rate`.
 

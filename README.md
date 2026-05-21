@@ -39,8 +39,8 @@
 - **缓存命中率**：实时计算并显示缓存命中率，自适应宽度进度条
 - **Token 明细**：缓存读 / 缓存写 / 未命中 / 输出，标签左对齐 · 数据右对齐
 - **费用与节省**：Session 累计费用 + 缓存命中带来的费用节省
-- **模型定价**：显示当前模型的输入 / 缓存读单价（从 provider 配置动态读取）
-- **折叠面板**：点击标题折叠为一行，节省侧边栏空间
+- **模型定价**：显示当前模型的输入 / 缓存读 / 缓存写单价（从 provider 配置动态读取）
+- **折叠面板**：主标题默认折叠，点击展开；明细、模型、分布各自独立折叠
 - **颜色自适应**：命中率 ≥85% 绿 · ≥70% 橙 · <70% 红，颜色从主题色自动去饱和
 - **Token 分布**：按角色（系统提示 / 用户 / Agent 指令 / Tool 调用 / Tool 结果）展示估算 Token 占比
 - **区块折叠**：明细、模型、Token 分布各自独立折叠
@@ -100,6 +100,11 @@ npm install -g opencode-visual-cache@latest
 | `/cache-rate` | 调整汇率乘数 | 输入自定义汇率（如 `7.2`），用于费用换算 |
 | `/cache-section` | 开关区块显示 | 独立控制「Token 明细」「模型与定价」「估算 Token 分布」的显隐 |
 | `/cache-config` | 查看当前配置 | 弹出当前货币、汇率、区块可见性状态 |
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/Hotakus/opencode-visual-cache/master/assets/splash_cmd.png" alt="斜杠命令" width="49%"></img>
+  <img src="https://raw.githubusercontent.com/Hotakus/opencode-visual-cache/master/assets/ctrlP_cmd.png" alt="Ctrl+P 命令面板" width="49%"></img>
+</div>
 
 切换货币时会自动填入离线内置的近似汇率（以 USD 为基准），用户可随时通过 `/cache-rate` 自定义。
 
