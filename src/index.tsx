@@ -249,10 +249,11 @@ function num(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0
 }
 
-function fmtCost(n: number): string {
-  if (n >= 1) return "$" + n.toFixed(2)
-  if (n >= 0.01) return "$" + n.toFixed(3)
-  return "$" + n.toFixed(4)
+function fmtCost(n: number, symbol = "$", rate = 1): string {
+  const v = n * rate
+  if (v >= 1) return symbol + v.toFixed(2)
+  if (v >= 0.01) return symbol + v.toFixed(3)
+  return symbol + v.toFixed(4)
 }
 
 // ── token estimation ──
@@ -329,6 +330,11 @@ function TokenCachePanel(props: {
   const [detailOpen, setDetailOpen] = createSignal(true)
   const [modelOpen, setModelOpen] = createSignal(true)
   const [distOpen, setDistOpen] = createSignal(false)
+  const [currencySymbol, setCurrencySymbol] = createSignal("$")
+  const [exchangeRate, setExchangeRate] = createSignal(1)
+  const [sectionDetail, setSectionDetail] = createSignal(true)
+  const [sectionModel, setSectionModel] = createSignal(true)
+  const [sectionDist, setSectionDist] = createSignal(true)
   let boxEl: any
 
   // ── scan session messages reactively ──
@@ -529,6 +535,17 @@ function TokenCachePanel(props: {
       setDistOpen(Boolean(props.api.kv.get(`${KV_PREFIX}.dist`, false)))
     } catch {}
 
+    // Restore user config (currency, rate, section visibility)
+    try {
+      const sym = props.api.kv.get<string>(`${KV_PREFIX}.currency`)
+      const rate = props.api.kv.get<number>(`${KV_PREFIX}.rate`)
+      if (typeof sym === "string") setCurrencySymbol(sym)
+      if (typeof rate === "number" && rate > 0) setExchangeRate(rate)
+      setSectionDetail(Boolean(props.api.kv.get(`${KV_PREFIX}.section.detail`, true)))
+      setSectionModel(Boolean(props.api.kv.get(`${KV_PREFIX}.section.model`, true)))
+      setSectionDist(Boolean(props.api.kv.get(`${KV_PREFIX}.section.dist`, true)))
+    } catch {}
+
     const unsubPart = props.api.event.on("message.part.updated", () => {
       setPartVersion((v) => v + 1)
     })
@@ -658,6 +675,7 @@ function TokenCachePanel(props: {
           </text>
 
           {/* ── detail section (collapsible, default open) ── */}
+          <Show when={sectionDetail()}>
           <text onMouseUp={() => setDetailOpen((o) => { const n = !o; persistFold("detail", n); return n })}>
             <span style={{ fg: pal().muted }}>{detailOpen() ? "\u25bc " : "\u25b6 "}</span>
             <span style={{ fg: pal().primary }}><b>{T.secDetail}</b></span>
@@ -684,13 +702,15 @@ function TokenCachePanel(props: {
             <Show when={data().saved > 0}>
               <text>
                 <span style={{ fg: pal().muted }}>{T.saved}</span>
-                <span>{" ".repeat(Math.max(1, panelWidth() - GUTTER - visualWidth(T.saved) - visualWidth("~" + fmtCost(data().saved))))}</span>
-                <span style={{ fg: pal().success }}>~{fmtCost(data().saved)}</span>
+                <span>{" ".repeat(Math.max(1, panelWidth() - GUTTER - visualWidth(T.saved) - visualWidth("~" + fmtCost(data().saved, currencySymbol(), exchangeRate()))))}</span>
+                <span style={{ fg: pal().success }}>~{fmtCost(data().saved, currencySymbol(), exchangeRate())}</span>
               </text>
             </Show>
           </Show>
+          </Show>
 
           {/* ── model section (collapsible, default open) ── */}
+          <Show when={sectionModel()}>
           {<text onMouseUp={() => setModelOpen((o) => { const n = !o; persistFold("model", n); return n })}>
             <span style={{ fg: pal().muted }}>{modelOpen() ? "\u25bc " : "\u25b6 "}</span>
             <span style={{ fg: pal().primary }}><b>{T.secModel}</b></span>
@@ -699,7 +719,7 @@ function TokenCachePanel(props: {
 
           <Show when={modelOpen()}>
             <text fg={pal().text}>
-              {justify(T.cost,  fmtCost(data().cost))}
+              {justify(T.cost,  fmtCost(data().cost, currencySymbol(), exchangeRate()))}
             </text>
             <Show when={data().providerName}>
               <text fg={pal().muted}>
@@ -722,11 +742,13 @@ function TokenCachePanel(props: {
                 <text fg={pal().muted}>
                   {justify("", "$" + data().cacheWriteRate.toFixed(2) + "/M " + T.writeRate)}
                 </text>
-              </Show>
             </Show>
           </Show>
+          </Show>
+        </Show>
 
           {/* ── token distribution (collapsible, default closed) ── */}
+          <Show when={sectionDist()}>
           <Show when={data().hasDistData}>
             {<text onMouseUp={() => setDistOpen((o) => { const n = !o; persistFold("dist", n); return n })}>
               <span style={{ fg: pal().muted }}>{distOpen() ? "\u25bc " : "\u25b6 "}</span>
@@ -764,6 +786,7 @@ function TokenCachePanel(props: {
             </text>
             </Show>
           </Show>
+          </Show>
         </Show>
       </Show>
     </box>
@@ -793,6 +816,109 @@ function createSidebarSlot(api: TuiPluginApi): TuiSlotPlugin {
 
 const tui: TuiPlugin = async (api: TuiPluginApi) => {
   api.slots.register(createSidebarSlot(api))
+
+  // ── slash commands for runtime config ──
+  const KV_PREFIX = "cache_panel"
+  const CURRENCIES: Record<string, string> = {
+    USD: "$", CNY: "¥", EUR: "€", JPY: "¥", GBP: "£", KRW: "₩",
+  }
+
+  api.command?.register(() => [
+    {
+      title: "Cache: Set Currency",
+      value: "cache.currency",
+      description: "Change the currency unit for cost display",
+      slash: { name: "cache-currency" },
+      onSelect: (dialog) => {
+        dialog?.replace(() => (
+          <api.ui.DialogSelect
+            title="Select Currency"
+            options={Object.entries(CURRENCIES).map(([code, sym]) => ({
+              title: `${code}  (${sym})`,
+              value: sym,
+            }))}
+            onSelect={(opt) => {
+              api.kv.set(`${KV_PREFIX}.currency`, opt.value)
+              api.kv.set(`${KV_PREFIX}.rate`, 1)
+              api.ui.toast({ message: `Currency set to ${opt.value} (rate reset to 1)` })
+              dialog?.clear()
+            }}
+          />
+        ))
+      },
+    },
+    {
+      title: "Cache: Set Exchange Rate",
+      value: "cache.rate",
+      description: "Set the exchange rate multiplier for the selected currency",
+      slash: { name: "cache-rate" },
+      onSelect: (dialog) => {
+        dialog?.replace(() => (
+          <api.ui.DialogPrompt
+            title="Exchange Rate"
+            description={() => <text>Enter the exchange rate from USD to your currency (e.g. 7.2 for CNY)</text>}
+            placeholder="1.0"
+            value={String(api.kv.get<number>(`${KV_PREFIX}.rate`, 1))}
+            onConfirm={(val) => {
+              const n = parseFloat(val)
+              if (n > 0) {
+                api.kv.set(`${KV_PREFIX}.rate`, n)
+                api.ui.toast({ message: `Exchange rate set to ${n}` })
+              }
+              dialog?.clear()
+            }}
+          />
+        ))
+      },
+    },
+    {
+      title: "Cache: Toggle Section",
+      value: "cache.section",
+      description: "Show or hide a sidebar section",
+      slash: { name: "cache-section" },
+      onSelect: (dialog) => {
+        const detailOn = Boolean(api.kv.get(`${KV_PREFIX}.section.detail`, true))
+        const modelOn  = Boolean(api.kv.get(`${KV_PREFIX}.section.model`, true))
+        const distOn   = Boolean(api.kv.get(`${KV_PREFIX}.section.dist`, true))
+        dialog?.replace(() => (
+          <api.ui.DialogSelect
+            title="Toggle Section"
+            options={[
+              { title: `Token Detail    [${detailOn ? "ON" : "OFF"}]`,  value: "detail" },
+              { title: `Model & Pricing [${modelOn  ? "ON" : "OFF"}]`,  value: "model" },
+              { title: `Token Dist.     [${distOn   ? "ON" : "OFF"}]`,  value: "dist" },
+            ]}
+            onSelect={(opt) => {
+              const key = `${KV_PREFIX}.section.${opt.value}`
+              const cur = Boolean(api.kv.get(key, true))
+              api.kv.set(key, !cur)
+              api.ui.toast({ message: `${opt.value} section ${!cur ? "shown" : "hidden"} (restart session or toggle panel to apply)` })
+              dialog?.clear()
+            }}
+          />
+        ))
+      },
+    },
+    {
+      title: "Cache: Show Config",
+      value: "cache.config",
+      description: "Display the current plugin configuration",
+      slash: { name: "cache-config" },
+      onSelect: (dialog) => {
+        const sym = api.kv.get<string>(`${KV_PREFIX}.currency`) ?? "$"
+        const rate = api.kv.get<number>(`${KV_PREFIX}.rate`) ?? 1
+        const detail = Boolean(api.kv.get(`${KV_PREFIX}.section.detail`, true))
+        const model = Boolean(api.kv.get(`${KV_PREFIX}.section.model`, true))
+        const dist = Boolean(api.kv.get(`${KV_PREFIX}.section.dist`, true))
+        api.ui.toast({
+          title: "Cache Panel Config",
+          message: `Currency: ${sym}  |  Rate: ${rate}  |  Detail: ${detail ? "ON" : "OFF"}  |  Model: ${model ? "ON" : "OFF"}  |  Dist: ${dist ? "ON" : "OFF"}`,
+          duration: 8000,
+        })
+        dialog?.clear()
+      },
+    },
+  ])
 }
 
 const mod: TuiPluginModule & { id: string } = {
