@@ -1,7 +1,7 @@
 {
-  "name": "opencode-visual-cache",
-  "version": "1.2.7",
-  "description": "OpenCode TUI plugin displaying real-time token cache hit rate in the sidebar",
+  "name": "opencode-cache-stats",
+  "version": "1.0.0",
+  "description": "OpenCode TUI plugin displaying real-time token cache stats in the sidebar",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -21,11 +21,10 @@
     "dist",
     "src",
     "install.mjs",
-    "README.md",
-    "README_EN.md"
+    "README.md"
   ],
   "bin": {
-    "opencode-visual-cache": "install.mjs"
+    "opencode-cache-stats": "install.mjs"
   },
   "scripts": {
     "build": "tsc",

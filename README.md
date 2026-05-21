@@ -1,190 +1,54 @@
 <div align="center">
-<strong>
-    <h1>OpenCode Visual Cache</h1>
-    实时 Token 缓存命中率 · TUI 侧边栏可视化<br>
-    自适应主题色 · 自动低饱和设计语言 · 支持中/英双语
-</strong>
-<br>
-<br>
-如果你觉得这个插件不错的话，可以帮我点点小星星 ⭐，谢谢！<br>
-<br>
 
-[![GitHub](https://img.shields.io/badge/GitHub-Repository-black?style=flat-square&logo=github)](https://github.com/Hotakus/opencode-visual-cache)
-[![Stars](https://img.shields.io/github/stars/Hotakus/opencode-visual-cache?style=flat-square)](https://github.com/Hotakus/opencode-visual-cache/stargazers)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
-[![English](https://img.shields.io/badge/English-README-blue?style=flat-square)](https://github.com/Hotakus/opencode-visual-cache/blob/master/README_EN.md)
-![NPM Version](https://img.shields.io/npm/v/opencode-visual-cache?style=flat-square)
+# OpenCode Cache Stats
 
 </div>
 
 ---
 
-## 1. 图片展示
+## overview
 
-<div align="center"> 
-<strong>支持折叠，节省侧边栏占用👇</strong> <br>
-<img src="https://raw.githubusercontent.com/Hotakus/opencode-visual-cache/master/assets/collapse.png"></img>
-<img src="https://raw.githubusercontent.com/Hotakus/opencode-visual-cache/master/assets/collapse_en.png"></img>
-</div>
-<div align="center"> 
-<strong>展开👇</strong> <br>
-<img src="https://raw.githubusercontent.com/Hotakus/opencode-visual-cache/master/assets/expand.png"></img>
-<img src="https://raw.githubusercontent.com/Hotakus/opencode-visual-cache/master/assets/expand_en.png"></img>
-</div>
-
-
----
-## 2. 功能
-
-- **缓存命中率**：实时计算并显示缓存命中率，自适应宽度进度条
-- **Token 明细**：缓存读 / 缓存写 / 未命中 / 输出，标签左对齐 · 数据右对齐
-- **费用与节省**：Session 累计费用 + 缓存命中带来的费用节省
-- **模型定价**：显示当前模型的输入 / 缓存读 / 缓存写单价（从 provider 配置动态读取）
-- **折叠面板**：主标题默认折叠，点击展开；明细、模型、分布各自独立折叠
-- **颜色自适应**：命中率 ≥85% 绿 · ≥70% 橙 · <70% 红，颜色从主题色自动去饱和
-- **Token 分布**：按角色（系统提示 / 用户 / Agent 指令 / Tool 调用 / Tool 结果）展示估算 Token 占比
-- **折叠记忆**：折叠状态持久化，重启后保持
-- **语言适配**：自动检测系统语言
-- **多币种**：通过 `/cache-currency` 切换货币，费用和节省同步换算
-- **斜杠命令**：`/cache-rate` `/cache-section` `/cache-config` 动态配置面板
+![img](assets/expand.png)
 
 ---
 
-## 3. 安装
+## Installation
 
-### 3.1 方式一：OpenCode 命令安装（推荐）
+### OpenCode Command (recommended)
 
-在 OpenCode 中按 **`Ctrl + P`** 打开命令面板，搜索 **`install plugin`**，输入：
+Press **`Ctrl + P`** in OpenCode to open the command palette, search **`install plugin`**, then type:
 
 ```
-opencode-visual-cache@latest
+opencode-cache-stats@latest
 ```
 
-回车即可完成安装与配置。
+Press Enter to install and configure automatically.
 
-### 3.2 方式二：手动安装
+### Manual
 
-**1. 安装插件**
+**Install the plugin**
 
 ```bash
-npm install -g opencode-visual-cache@latest
+npm install -g opencode-cache-stats@latest
 ```
 
-**2. 配置 TUI 插件**
+**Configure TUI plugin**
 
-创建或编辑 `~/.config/opencode/tui.jsonc`：
+Create or edit `~/.config/opencode/tui.jsonc`:
 
 ```jsonc
 {
   "$schema": "https://opencode.ai/tui.json",
-  "plugin": ["opencode-visual-cache@latest"]
+  "plugin": ["opencode-cache-stats@latest"]
 }
 ```
 
-### 3.3 重启 OpenCode
+### Restart OpenCode
 
-进入任意 session，侧边栏即可看到缓存统计面板。
-
----
-
-## 4. 使用指南
-
-### 4.1 斜杠命令
-
-插件支持通过斜杠命令或命令面板（`Ctrl + P`）动态调整配置，所有设置即时生效并持久化：
-
-| 命令 | 功能 | 使用方式 |
-|------|------|---------|
-| `/cache-currency` | 切换货币单位 | 从列表选择货币（USD / CNY / EUR / JPY / GBP / KRW），自动填入默认汇率 |
-| `/cache-rate` | 调整汇率乘数 | 输入自定义汇率（如 `7.2`），用于费用换算 |
-| `/cache-section` | 开关区块与边框 | 独立控制 Token 明细 / 模型与定价 / 估算 Token 分布 / 面板边框的显隐 |
-| `/cache-config` | 查看当前配置 | 弹出当前货币、汇率、区块可见性状态 |
-
-<div align="center">
-  <img src="https://raw.githubusercontent.com/Hotakus/opencode-visual-cache/master/assets/splash_cmd.png" alt="斜杠命令" width="49%"></img>
-  <img src="https://raw.githubusercontent.com/Hotakus/opencode-visual-cache/master/assets/ctrlP_cmd.png" alt="Ctrl+P 命令面板" width="49%"></img>
-</div>
-
-切换货币时会自动填入离线内置的近似汇率（以 USD 为基准），用户可随时通过 `/cache-rate` 自定义。
-
-### 4.2 货币与汇率
-
-费用展示支持多币种切换：
-
-| 货币代码 | 符号 | 默认汇率（1 USD = ?） |
-|---------|------|---------------------|
-| USD | `$` | 1 |
-| CNY | `¥` | 7.2 |
-| EUR | `€` | 0.92 |
-| JPY | `JP¥` | 150 |
-| GBP | `£` | 0.79 |
-| KRW | `₩` | 1350 |
-
-> 汇率会同步应用到 Session 累计费用、缓存节省金额、以及模型单价展示。
->
-> **基币说明**：插件假设提供商定价均为美元（USD）。目前主流 AI API（OpenAI / Anthropic / Google / DeepSeek / xAI 等）的国际版均以 USD 计价。如果你使用的提供商以人民币或其他货币计价，请将汇率设为 `1`。
-
-### 4.3 区块可见性
-
-面板中的三个子区块可以独立关闭，方便在侧边栏空间紧张时隐藏不需要的信息：
-
-- **Token 明细**：缓存读 / 缓存写 / 未命中 / 输出
-- **模型与定价**：费用 / 提供商 / 模型名 / 单价
-- **估算 Token 分布**：按角色拆分的 Token 估算
-
-通过 `/cache-section` 切换后即时生效，无需重启。此外，该命令还可以开关面板的**外边框**——关闭后内容会顶格显示，释放额外空间。
+Open any session — the cache stats panel appears in the sidebar.
 
 ---
 
-## 5. 更新
+## License
 
-由于 [OpenCode 已知问题 #6774](https://github.com/anomalyco/opencode/issues/6774)，插件缓存会锁死在首次安装时的版本，不会自动检测 npm 上的新版本。
-
-更新步骤：
-
-**1. 清除 OpenCode 插件缓存**
-
-```powershell
-# Windows
-Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\opencode\packages\opencode-visual-cache@latest"
-```
-
-```bash
-# macOS / Linux
-rm -rf ~/.cache/opencode/packages/opencode-visual-cache@latest
-```
-
-**2. 重新安装插件**
-
-在 OpenCode 中按 **`Ctrl + P`** → `install plugin` → `opencode-visual-cache@latest` → 回车
-
-**3. 重启 OpenCode**
-
----
-
-## 6. 调试
-
-强制英文：
-
-```powershell
-# Windows PowerShell
-$env:CACHE_TUI_LANG="en"; opencode
-```
-
-```bash
-# macOS / Linux
-CACHE_TUI_LANG=en opencode
-```
-
----
-
-## 7. 兼容性
-
-代码完全模型无关，支持所有 OpenCode 兼容的 AI 模型（DeepSeek / Claude / GPT 等）。
-Token 数据和定价信息均通过 OpenCode SDK 标准接口获取。
-
----
-
-## 8. License
-
-MIT
+[MIT](LICENSE)

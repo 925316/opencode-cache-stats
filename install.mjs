@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Install script for opencode-visual-cache.
+ * Install script for opencode-cache-stats.
  *
  * Creates or updates `~/.config/opencode/tui.jsonc` so OpenCode loads
  * the TUI sidebar plugin.  Also optionally adds the plugin to
@@ -9,7 +9,7 @@
  *
  * Usage:
  *   node install.mjs
- *   npm explore opencode-cache-hit-tui -- node install.mjs
+ *   npm explore opencode-cache-stats -- node install.mjs
  */
 
 import { readFile, writeFile, mkdir, access } from "node:fs/promises"
@@ -21,7 +21,7 @@ import { join, dirname } from "node:path"
 // Helpers
 // ---------------------------------------------------------------------------
 
-const PLUGIN_SPEC = "opencode-visual-cache"
+const PLUGIN_SPEC = "opencode-cache-stats"
 
 function configDir() {
   if (platform() === "win32") {
@@ -73,9 +73,9 @@ async function main() {
     tuiChanged = mergePlugin(cfg, PLUGIN_SPEC)
     if (tuiChanged) {
       await writeFile(tuiPath, formatJSONC(cfg))
-      console.log(`[opencode-cache-hit-tui] Added to ${tuiPath}`)
+      console.log(`[opencode-cache-stats] Added to ${tuiPath}`)
     } else {
-      console.log(`[opencode-cache-hit-tui] Already in ${tuiPath}`)
+      console.log(`[opencode-cache-stats] Already in ${tuiPath}`)
     }
   } else {
     const cfg = {
@@ -83,7 +83,7 @@ async function main() {
       plugin: [PLUGIN_SPEC],
     }
     await writeFile(tuiPath, formatJSONC(cfg))
-    console.log(`[opencode-cache-hit-tui] Created ${tuiPath}`)
+    console.log(`[opencode-cache-stats] Created ${tuiPath}`)
     tuiChanged = true
   }
 
@@ -96,7 +96,7 @@ async function main() {
     ocChanged = mergePlugin(cfg, PLUGIN_SPEC)
     if (ocChanged) {
       await writeFile(ocPath, formatJSONC(cfg))
-      console.log(`[opencode-cache-hit-tui] Also added to ${ocPath}`)
+      console.log(`[opencode-cache-stats] Also added to ${ocPath}`)
     }
   }
 

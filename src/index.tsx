@@ -323,7 +323,7 @@ const tui: TuiPlugin = async (api: TuiPluginApi) => {
 }
 
 const mod: TuiPluginModule & { id: string } = {
-  id: "opencode-visual-cache",
+  id: "opencode-cache-stats",
   tui,
 }
 
